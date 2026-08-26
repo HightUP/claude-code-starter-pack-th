@@ -4,12 +4,11 @@
   "version": "1.0.0",
   "description": "Starter pack B2 Tech: hooks de segurança, skills de code review e security audit. Pensado para projetos novos com stack Python/Flask + Next.js/TS em GCP.",
   "author": {
-    "name": "Bruno Bracaioli",
-    "email": "bruno@b2tech.com",
-    "url": "https://b2tech.io"
+    "name": "HightUP",
+    "url": "https://github.com/HightUP"
   },
-  "homepage": "https://b2tech.io",
-  "repository": "https://github.com/brunobracaioli/claude-code-starter-pack",
+  "homepage": "https://github.com/HightUP/claude-code-starter-pack-th",
+  "repository": "https://github.com/HightUP/claude-code-starter-pack-th",
   "license": "MIT",
   "keywords": [
     "security",

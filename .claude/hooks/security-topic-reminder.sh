@@ -14,7 +14,7 @@ set -uo pipefail
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // ""')
 
-KEYWORDS='senha|password|login|autentica|\bauth\b|sess(a|ã)o|token|jwt|permiss(a|ã)o|\brbac\b|\brole\b|\badmin\b|pagamento|payment|\bpix\b|cart(a|ã)o|stripe|webhook|callback|upload|anexo|banco de dados|database|\bsql\b|\brls\b|supabase|migration|credencial|api[_ ]?key|secret|criptograf|\bhash\b|cookie|\bcors\b|\bcsrf\b|\bxss\b|\bsqli\b|injection|vulnerabilidade|invadir|hacke(ar|r)|pentest|exploit'
+KEYWORDS='senha|password|login|autentica|\bauth\b|sess(a|ã)o|(access|auth|api|refresh|session)[_ -]?token|token de (acesso|sess(a|ã)o|autentica[cç][aã]o)|jwt|permiss(a|ã)o|\brbac\b|\brole\b|\badmin\b|pagamento|payment|\bpix\b|cart(a|ã)o|stripe|webhook|callback|upload|anexo|banco de dados|database|\bsql\b|\brls\b|supabase|migration|credencial|api[_ ]?key|secret|criptograf|senha.*hash|hash.*senha|password.*hash|cookie|\bcors\b|\bcsrf\b|\bxss\b|\bsqli\b|injection|vulnerabilidade|invadir|hacke(ar|r)|pentest|exploit'
 
 if ! echo "$PROMPT" | grep -qiE "$KEYWORDS"; then
   exit 0
