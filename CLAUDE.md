@@ -76,10 +76,42 @@ Superpowers (brainstorming → writing-plans → subagent-driven-development) j�
 - Para decisões técnicas de sistema web (auth, permissões, dados): invoque a skill `web-app-checklist`.
 - Para regras determinísticas (formatação, secrets, comandos perigosos): já há hooks rodando.
 
+## Segurança não é sob demanda — é gate
+
+`security-check` é uma skill conversacional: só roda se alguém (você ou eu) lembrar de
+pedir. Isso não é confiável sozinho — por isso `pre-commit-security-gate.sh` **bloqueia**
+todo `git commit` que toca área sensível (webhook/callback, auth/sessão, `Dockerfile`,
+pagamento, migrations) até a mensagem do commit trazer a marca `Security-check: ok (...)`
+ou `Security-check: findings corrigidos (...)`.
+
+Na prática: sempre que eu for commitar mudança numa dessas áreas, devo invocar
+`security-check` **antes**, de verdade (não só escrever a marca pra destravar) — o hook
+não sabe se a revisão aconteceu, só confia na marca; a responsabilidade de não trapacear
+isso é minha, não do hook.
+
+## Quando sugerir `/claude-security` (varredura profunda)
+
+`claude-security` é caro e interativo (múltiplos agentes, minutos, pede modo `auto`) — não
+é pra reagir a toda menção de segurança, isso já é coberto pelas camadas automáticas
+(`security-guidance` em todo edit/commit, `security-check` sugerido via hook de prompt).
+Ele entra em momentos específicos onde uma varredura profunda de verdade compensa o custo.
+Devo **sugerir** (nunca rodar sozinho sem perguntar — é interativo e não é rápido) quando:
+
+- Antes de `make deploy-prod` ou qualquer deploy pra produção.
+- Antes de abrir PR / finalizar branch que mexeu em área crítica (auth, pagamento, RLS,
+  webhook externo) — encaixa bem no fluxo `finishing-a-development-branch` do Superpowers.
+- O usuário pedir auditoria "geral"/"completa"/"antes de lançar", não uma checagem pontual.
+- Não existir nenhum diretório `CLAUDE-SECURITY-*` no repo ainda e o projeto já tiver
+  código de produção rodando (nunca foi varrido).
+- Depois de corrigir um finding crítico do `security-check`, pra confirmar que não sobrou
+  nada correlato que o checklist manual não pega.
+
 ## O que NÃO fazer
 
 - Não criar arquivos `.env*` — use Secret Manager / Supabase secrets.
 - Não usar `any` em TypeScript sem comentário justificando.
 - Não fazer `git push --force` em `main`.
 - Não adicionar deps sem rodar audit primeiro.
+- Não declarar `ARG`/`ENV` de secret em `Dockerfile` — fica gravado na imagem (`docker history`) mesmo se "não usado" no build; hook já bloqueia no commit, mas não conte só com isso na hora de escrever. Segredo só via `process.env`/`os.environ` em runtime, ou `RUN --mount=type=secret` se o build precisar.
+- Não registrar webhook/callback de integração externa (pagamento, banco, gateway) sem validar origem (assinatura, mTLS, ou secret com `timingSafeEqual`) — e sem reconfirmar o estado via chamada autenticada de volta pro provedor antes de gravar algo no banco.
 - Não usar `${CLAUDE_PROJECT_DIR}` sem aspas em `command` de hooks no `.claude/settings.json`. Se o projeto estiver dentro de uma pasta com espaço no nome (ex: `C:\VS Code\...`), a variável expande sem aspas e o bash quebra a palavra no espaço, tentando rodar um caminho inválido. Sempre escreva `"\"${CLAUDE_PROJECT_DIR}/.claude/hooks/algo.sh\""` (aspas duplas escapadas envolvendo o valor inteiro).

@@ -15,7 +15,7 @@ Permissões determinísticas · Hooks que rodam 100% das vezes · Skills sob dem
 ![Claude Code](https://img.shields.io/badge/Claude_Code-v2.1%2B-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-3FB950?style=for-the-badge)
 ![Stack](https://img.shields.io/badge/stack-Python_·_Next.js_·_GCP-1F6FEB?style=for-the-badge)
-![Status](https://img.shields.io/badge/version-2.0-8957E5?style=for-the-badge)
+![Status](https://img.shields.io/badge/version-2.1-8957E5?style=for-the-badge)
 
 </div>
 
@@ -136,10 +136,18 @@ como contexto para auto-correção.
 
 | Hook | Evento | Matcher | O que faz |
 |------|--------|---------|-----------|
-| `pre-bash-guard.sh` | `PreToolUse` | `Bash` | Bloqueia `rm -rf /`, fork bombs, `mkfs`, `DROP/TRUNCATE`, `curl \| sh`, `git push --force` em `main`, e remoção de arquivos sensíveis. |
-| `pre-commit-secrets.sh` | `PreToolUse` | `Bash` | Em `git commit`/`push`, escaneia arquivos *staged* por chaves AWS/GitHub/OpenAI/Anthropic/Slack/Meta e private keys. |
+| `pre-bash-guard.sh` | `PreToolUse` | `Bash` | Bloqueia `rm -rf /`, fork bombs, `mkfs`, `DROP/TRUNCATE`, `curl \| sh`, `git push --force` em `main`, remoção de arquivos sensíveis, e `docker build --build-arg` com nome de secret na linha de comando. |
+| `pre-commit-secrets.sh` | `PreToolUse` | `Bash` | Em `git commit`/`push`, escaneia arquivos *staged* por chaves AWS/GitHub/OpenAI/Anthropic/Slack/Meta e private keys; bloqueia `ARG` de secret em `Dockerfile`; roda `gitleaks` como camada extra se estiver instalado (opcional, graceful degrade). |
+| `pre-commit-security-gate.sh` | `PreToolUse` | `Bash` | Em `git commit`, bloqueia se o diff tocar área sensível (webhook/callback, auth/sessão, `Dockerfile`, pagamento, migrations) **e** a mensagem do commit não trouxer a marca `Security-check: ...` — força invocar a skill `security-check` antes de commitar mudança sensível, em vez de depender de alguém lembrar de pedir. |
 | `post-edit-format.sh` | `PostToolUse` | `Write \| Edit \| NotebookEdit` | Formata e dá lint após edições: Prettier+ESLint (JS/TS), Ruff (Python), `jq` (JSON), `gofmt` (Go), `rustfmt` (Rust). |
 | `block-secrets.sh` | — | — | **Não wired por padrão.** Guard mais agressivo: bloqueia qualquer tool tocando `.env`, `secrets/`, chaves SSH, `~/.aws`, `~/.config/gcloud`, etc. |
+
+> 🔍 **`gitleaks` (opcional, recomendado):** `pre-commit-secrets.sh` detecta automaticamente se
+> [`gitleaks`](https://github.com/gitleaks/gitleaks) está instalado (`brew install gitleaks` /
+> `scoop install gitleaks`) e, se sim, roda `gitleaks protect --staged` como camada extra —
+> cobre padrões de secret que o regex hand-rolled do hook não lista (chaves genéricas, alta
+> entropia, dezenas de provedores mantidos pela comunidade). Sem `gitleaks` instalado, o hook
+> segue funcionando normalmente só com o regex.
 
 <details>
 <summary><b>Como ativar o <code>block-secrets.sh</code></b></summary>
@@ -174,7 +182,7 @@ contexto da conversa bate com a `description`.
 | Skill | Quando invocar | Cobre |
 |-------|----------------|-------|
 | 👀 **`code-review-b2`** | *"revise o código"*, *"code review"*, fim de feature/PR | Vertical Slice + DDD, Security by Design, qualidade Python/Flask + Next.js/TS, testes. Output com `🔴 Blocker` / `🟡 Major` / `🟢 Nit` + decisão. |
-| 🔐 **`security-check`** | *"audite a segurança"*, antes de subir pra prod | OWASP Top 10, secrets, AuthN/AuthZ, supply chain, logs. Findings `🔥 CRÍTICO`→`🔵 INFO` com ameaça → impacto → fix. |
+| 🔐 **`security-check`** | *"audite a segurança"*, antes de subir pra prod | OWASP Top 10, secrets (incl. `ARG`/`ENV` de Dockerfile), AuthN/AuthZ, webhooks/callbacks de integração externa, container/Docker (non-root, `.dockerignore`), supply chain, logs. Findings `🔥 CRÍTICO`→`🔵 INFO` com ameaça → impacto → fix. |
 | ✍️ **`commit`** | `/commit` (ou peça pra commitar) | Stage + mensagem em Conventional Commits a partir do diff. **Não dá push** — você decide quando. |
 | 🎭 **`frontend-design`** | *"crie um componente/página/UI"* | Frontend distinto e production-grade, fugindo da estética genérica de IA. Inclui template pra documentar `docs/DESIGN.md` (front matter YAML + seções). |
 | 🧩 **`web-app-checklist`** | projeto com cadastro + login + perfis, durante design/planejamento | Checklist de decisões técnicas de sistema web (autenticação, RBAC, soft delete, auditoria, uploads, migrations, logs) que skills de brainstorming genéricas não cobrem. Não é gate — só complementa. |
@@ -212,6 +220,28 @@ O `.claude-plugin/plugin.json` empacota hooks e skills como o plugin
 copiar arquivos manualmente, cada projeto instala o pack com um comando.
 
 ---
+
+## ✨ Novidades da 2.1
+
+Motivado por gaps reais achados numa auditoria de segurança pré-produção
+(container Docker vazando secret via `ARG` de build, webhook sem autenticação,
+container root, headers ausentes) — os 4 achados viraram checklist permanente:
+
+- 🆕 **`security-check`** ganhou 3 seções novas: **Container/Docker** (non-root
+  `USER`, `.dockerignore`, sem `ARG`/`ENV` de secret), **Webhooks/callbacks**
+  (validação de origem + reconfirmação autenticada antes de gravar estado), e
+  headers `X-Frame-Options`/`Referrer-Policy` na seção INFO.
+- 🆕 **`pre-commit-secrets.sh`** agora bloqueia `ARG` de secret em `Dockerfile`
+  (fica gravado em `docker history` mesmo "não usado" no build) e roda
+  `gitleaks` como camada extra se estiver instalado (opcional).
+- 🆕 **`pre-bash-guard.sh`** bloqueia `docker build --build-arg NOME_SECRETO=...`
+  passado direto na linha de comando (mesmo risco do `ARG`, sem passar por
+  arquivo staged).
+- 🆕 **Hook `pre-commit-security-gate.sh`** — transforma "rodar `security-check`
+  antes de mudança sensível" de conselho em regra: bloqueia `git commit` que
+  toca webhook/auth/`Dockerfile`/pagamento sem a marca `Security-check: ...` na
+  mensagem. Skill não vira automática sozinha (não é script), mas o hook é o
+  jeito determinístico de garantir que ela seja chamada mesmo quando ninguém lembra.
 
 ## ✨ Novidades da 2.0
 

@@ -51,4 +51,49 @@ if [ -n "$found" ]; then
   exit 2
 fi
 
+# ARG de build com nome de secret em Dockerfile: vira parte permanente da
+# imagem (visível via `docker history`/`docker inspect`), diferente de ENV
+# setado em runtime. Doc oficial do Docker/BuildKit trata isso como anti-padrão
+# (build check "SecretsUsedInArgOrEnv") — o certo é RUN --mount=type=secret.
+# Exceção: NEXT_PUBLIC_* já é público por design (embutido no bundle do browser).
+dockerfile_secrets=""
+while IFS= read -r file; do
+  [ ! -f "$file" ] && continue
+  case "$(basename "$file")" in
+    Dockerfile|Dockerfile.*|*.dockerfile) ;;
+    *) continue ;;
+  esac
+
+  while IFS= read -r line; do
+    arg_name=$(echo "$line" | sed -E 's/^ARG[[:space:]]+([A-Za-z0-9_]+).*/\1/')
+    [ -z "$arg_name" ] && continue
+    if echo "$arg_name" | grep -qiE '(SECRET|KEY|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE)' \
+      && ! echo "$arg_name" | grep -qE '^NEXT_PUBLIC_'; then
+      dockerfile_secrets+="  • $file: ARG $arg_name\n"
+    fi
+  done < <(grep -E '^ARG[[:space:]]+' "$file")
+done <<< "$STAGED"
+
+if [ -n "$dockerfile_secrets" ]; then
+  echo "🚨 ARG de build com nome de secret detectado em Dockerfile:" >&2
+  echo -e "$dockerfile_secrets" >&2
+  echo "ARGs ficam gravados na imagem Docker (docker history), mesmo sem 'ser usados' de fato no build." >&2
+  echo "Segredo deve ser lido só em runtime via variável de ambiente (process.env / os.environ), ou via 'RUN --mount=type=secret' no build. Nunca como ARG/ENV. Exceção: NEXT_PUBLIC_* (já é público por design)." >&2
+  echo "Se for falso positivo, faça o commit manualmente fora do Claude." >&2
+  exit 2
+fi
+
+# Camada extra opcional: se gitleaks estiver instalado, roda sobre os arquivos
+# staged. Regex acima é hand-rolled (só os padrões que listamos); gitleaks tem
+# regras mantidas pra centenas de provedores + detecção por entropia. Se não
+# tiver instalado, segue só com o regex acima — não é dependência obrigatória.
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks_output=$(gitleaks protect --staged --no-banner --redact -v 2>&1); then
+    echo "🚨 gitleaks encontrou possível secret nos arquivos staged:" >&2
+    echo "$gitleaks_output" >&2
+    echo "Remova o secret antes de commitar. Se for falso positivo, ajuste .gitleaks.toml ou commit manualmente fora do Claude." >&2
+    exit 2
+  fi
+fi
+
 exit 0

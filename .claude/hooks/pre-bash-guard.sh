@@ -46,4 +46,15 @@ if echo "$COMMAND" | grep -qE '(^|[;&|]) *rm [^;&|]*(\.env(\.|$|[[:space:]/])|/s
   exit 2
 fi
 
+# `docker build --build-arg NOME=valor` com nome de secret: mesmo problema do
+# `ARG` em Dockerfile (fica gravado em docker history), só que passado direto
+# na linha de comando em vez de commitado — pre-commit-secrets.sh não pega
+# isso porque não há arquivo staged nenhum.
+if echo "$COMMAND" | grep -qE 'docker (buildx )?build\b' \
+  && echo "$COMMAND" | grep -qiE -- '--build-arg[= ][A-Za-z0-9_]*(SECRET|KEY|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE)[A-Za-z0-9_]*='; then
+  echo "🚫 '--build-arg' com nome de secret detectado. ARGs ficam gravados na imagem (docker history)." >&2
+  echo "Use 'docker build --secret id=...' + 'RUN --mount=type=secret' no Dockerfile, ou injete só em runtime." >&2
+  exit 2
+fi
+
 exit 0

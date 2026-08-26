@@ -21,7 +21,14 @@ allowed-tools: Read, Bash
 Based on the changes above:
 
 1. Stage all modified/added files (excluding .env, secrets, build artifacts)
-2. Generate a conventional commit message: `type(scope): description`
+2. **Check if staged files touch a security-sensitive path** (webhook/callback
+   route, auth/session code, `Dockerfile`, payment/banking integration,
+   migrations). If so, invoke the `security-check` skill on those files
+   *before* committing — `pre-commit-security-gate.sh` blocks the commit
+   otherwise. Add a trailer to the commit message reflecting the result:
+   `Security-check: ok (sem findings críticos)` or
+   `Security-check: findings corrigidos (resumo curto)`.
+3. Generate a conventional commit message: `type(scope): description`
    - `feat` for new features
    - `fix` for bug fixes
    - `refactor` for code restructuring
@@ -29,6 +36,6 @@ Based on the changes above:
    - `test` for test additions/changes
    - `chore` for maintenance tasks
    - `ci` for CI/CD changes
-3. If the user provided a message via $ARGUMENTS, use that instead
-4. Show the commit message and ask for confirmation before committing
-5. Do NOT push — let the user decide when to push
+4. If the user provided a message via $ARGUMENTS, use that instead
+5. Show the commit message and ask for confirmation before committing
+6. Do NOT push — let the user decide when to push

@@ -26,6 +26,7 @@ técnico ao que o projeto realmente usa, sem pular o item.
 - [ ] Nenhum secret hardcoded (grep por `api_key`, `password`, `secret`, `token` em código).
 - [ ] `.env` no `.gitignore` e nunca commitado (`git log --all --full-history -- .env`).
 - [ ] Secrets em runtime vêm de Secret Manager / env vars, ou — em stacks sem esse recurso (ex: PHP em hospedagem compartilhada) — de um arquivo de configuração em código (`config/config.php`) fora da pasta pública, git-ignored, nunca de `.env` exposto por engano.
+- [ ] **Dockerfile sem `ARG`/`ENV` para secret.** Qualquer `ARG`/`ENV` fica gravado permanentemente nas camadas da imagem (`docker history`/`docker inspect`), mesmo que o valor "não seja usado" de fato no build — é um vazamento independente do git (dois artefatos diferentes: histórico do repo vs. imagem construída). Isso vale mesmo quando a env var já está configurada corretamente em runtime no painel/orquestrador (Coolify, EasyPanel, Railway, k8s): muitas PaaS repassam **toda** variável do painel como `--build-arg` pra qualquer `ARG` de mesmo nome no `Dockerfile`, sem avisar. Fix: ler segredo só via `process.env`/`os.environ` já no container rodando; se o build precisar de credencial (ex: registry privado, `.npmrc`), usar `RUN --mount=type=secret` (BuildKit) — nunca `ARG`/`ENV`. Exceção: variáveis públicas por design (`NEXT_PUBLIC_*`, embutidas no bundle do browser mesmo).
 - [ ] Rotação documentada para secrets de produção.
 
 **Injeção (SQLi, XSS, Command Injection)**
@@ -53,6 +54,13 @@ técnico ao que o projeto realmente usa, sem pular o item.
 - [ ] Cookies de sessão: `HttpOnly`, `Secure`, `SameSite=Lax/Strict`.
 - [ ] Logout invalida sessão server-side (não só apaga cookie).
 - [ ] Session fixation: novo session ID após login.
+- [ ] **Timeout por inatividade**, não só validade máxima do token. Client SDK com auto-refresh (Supabase, Firebase) mantém a sessão viva pra sempre enquanto a aba ficar aberta, mesmo sem nenhuma interação do usuário — isso não é "sessão expira", é sessão eterna disfarçada. Se o sistema movimenta dinheiro real ou dado sensível, implemente logout automático client-side por inatividade (ex: 15min sem mousemove/keydown/click, com aviso antes de deslogar).
+
+**Webhooks / callbacks de integração externa (Stripe, bancos, PIX, gateways de pagamento)**
+- [ ] Toda rota de webhook valida a origem antes de processar o payload — assinatura HMAC (`X-Signature`/`Stripe-Signature`), mTLS dedicado, ou no mínimo um secret fixo (query string ou header) comparado com `timingSafeEqual`/`hmac.compare_digest` (nunca `===`/`==`, que vaza timing). Rota sem nenhuma verificação de origem é um endpoint público que aceita "confia em mim" de qualquer um na internet.
+- [ ] O handler nunca muda estado (aprovar pagamento, liberar produto, confirmar pedido) só com base no payload cru recebido — sempre reconfirma via chamada autenticada de volta pro provedor (`GET /pagamento/{id}`) antes de gravar. Isso neutraliza o pior cenário (forjar aprovação) mesmo se a validação de origem falhar ou for mais fraca (ex: secret em vez de mTLS).
+- [ ] Reentrega/duplicidade tratada (provedor reenvia o mesmo evento) — idempotência por ID do evento/transação, não por "já rodou uma vez nesse processo".
+- [ ] Falha ao processar um item do lote não derruba os outros itens do mesmo callback.
 
 **File upload / Storage**
 - [ ] Whitelist de tipos MIME (verificada no servidor, não só no cliente).
@@ -81,9 +89,23 @@ técnico ao que o projeto realmente usa, sem pular o item.
 - [ ] WAF (Cloudflare) ativo nas APIs públicas.
 - [ ] HTTPS enforced (redirect 301 de HTTP).
 
+**Container / Docker**
+- [ ] Stage final (`runner`) do `Dockerfile` roda com `USER` não-root — imagens `-alpine` (node, python) já trazem um usuário sem privilégio pronto (`node`, uid 1000), só falta `COPY --chown=` nos arquivos copiados + `USER <nome>` antes do `CMD`. Container root com uma RCE na aplicação (dependência vulnerável, upload malicioso) vira root **no container** de graça — não escapa o container sozinho, mas remove uma camada de contenção de graça.
+- [ ] Nenhum secret via `ARG`/`ENV` no `Dockerfile` (ver item em Secrets management, CRÍTICO).
+- [ ] `.dockerignore` exclui `.env*`, certificados/chaves, `node_modules`, `.git` — evita que `COPY . .` (ou `COPY web/ ./` sem escopo) inclua secret local sem querer.
+- [ ] Imagem final não carrega ferramenta de build desnecessária (multi-stage: `deps`/`builder` separados do `runner`, só o output necessário copiado pro stage final).
+
+**Banco de dados (Supabase/Postgres)**
+- [ ] RLS habilitado em toda tabela com dado sensível, **com política real** (RLS ligado sem policy bloqueia tudo; sem RLS libera tudo pro `anon`/`authenticated`) — checar via `pg_class.relrowsecurity` + `pg_policies`, não só assumir pelo nome da migration.
+- [ ] Se o projeto Supabase é compartilhado com outros apps/clientes (schemas diferentes no mesmo banco), a policy não pode confiar só em `authenticated` — precisa checar se o usuário tem vínculo *com este app específico* (ex: existe linha dele numa tabela de usuários deste schema), senão qualquer autenticado de qualquer app do mesmo projeto acessa dado de outro.
+- [ ] Função `SECURITY DEFINER` exposta via RPC: confirmar que ela só responde sobre o próprio `auth.uid()` do chamador (nunca aceita um ID arbitrário de outro usuário sem checar permissão) e que tem `SET search_path` fixo.
+- [ ] "Leaked Password Protection" do Supabase Auth habilitada (Dashboard → Authentication → Policies) — bloqueia senha já vazada em base pública (HaveIBeenPwned).
+
 ### 🔵 INFO
 
 - [ ] Header `Strict-Transport-Security` (HSTS) em domínios de produção.
+- [ ] Header `X-Frame-Options: DENY` (ou `frame-ancestors` na CSP) — evita clickjacking.
+- [ ] Header `Referrer-Policy` (ex: `strict-origin-when-cross-origin`) — evita vazar URL completa (com token/ID em query string) pro `Referer` de terceiros.
 - [ ] Header `Content-Security-Policy` mesmo que permissivo no início.
 - [ ] `robots.txt` e `security.txt` configurados.
 - [ ] Mensagens de erro genéricas para o usuário, detalhe só nos logs internos.
@@ -120,6 +142,15 @@ cursor.execute(query, (user_id,))
 1. <ação imediata>
 2. <ação backlog>
 ```
+
+Se essa auditoria for pré-requisito de um commit bloqueado por
+`pre-commit-security-gate.sh` (arquivo sensível staged), inclua ao final da
+mensagem de commit uma das linhas:
+- `Security-check: ok (sem findings críticos)` — nenhum CRÍTICO/ALTO achado.
+- `Security-check: findings corrigidos (resumo curto)` — achou e já corrigiu antes de commitar.
+
+Não adicione a linha só pra "destravar" o commit sem ter revisado de verdade —
+o hook confia na marca, então ela só vale alguma coisa se a revisão aconteceu.
 
 ## O que NÃO fazer
 
