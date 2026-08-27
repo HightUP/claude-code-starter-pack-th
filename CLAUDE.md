@@ -89,6 +89,39 @@ Na prática: sempre que eu for commitar mudança numa dessas áreas, devo invoca
 não sabe se a revisão aconteceu, só confia na marca; a responsabilidade de não trapacear
 isso é minha, não do hook.
 
+## Pentest dinâmico real com Strix (skills instaladas em `.agents/skills/`)
+
+`security-check`, `web-app-checklist` e `claude-security` são análise **estática**
+(leem código, nunca rodam o app). As skills da Strix (`penetration-testing-with-strix`,
+`web-app-penetration-testing`, `api-security-testing`, `owasp-top-10-testing`,
+`find-security-vulnerabilities-in-code`, `application-security-testing`,
+`ci-security-scanning-with-strix`, `fix-security-vulnerabilities-with-strix`,
+`managed-pentesting-with-strix`) são **dinâmicas**: agentes de IA rodam o alvo de
+verdade num sandbox Docker (ou via app.strix.ai gerenciado) e só reportam achado com
+exploit funcionando de prova — complementam, não substituem, as skills estáticas.
+
+**Nunca invocar essas skills automaticamente.** São ferramentas ofensivas de verdade
+(exploit real contra alvo real). Só rodar quando o usuário pedir explicitamente um
+pentest, e sempre confirmando antes:
+
+- **Alvo é da própria empresa/cliente com autorização explícita pra teste?** Nunca
+  apontar pra domínio/repo de terceiro sem confirmação clara de que há autorização.
+- **Ambiente correto?** Preferir staging/homolog; só ir pra prod se o usuário pedir
+  de propósito e entender o risco (exploits reais podem gerar dado inconsistente,
+  disparar alertas, etc).
+- **Custo:** CLI open-source precisa de `LLM_API_KEY` (gasto por token, usar
+  `--max-budget`) + Docker rodando local. Opção gerenciada (`app.strix.ai`) não
+  precisa de Docker/key local mas tem custo próprio da plataforma.
+- **Instalação do binário** (`curl -sSL https://strix.ai/install | bash`) só na
+  primeira vez que for rodar de verdade — bate na regra de `deny` do
+  `.claude/settings.json` (`curl * | sh`), então sempre mostrar o script ao usuário
+  e pedir confirmação explícita antes de rodar, nunca executar direto.
+
+Bom gatilho de uso (mesmos momentos do `/claude-security`, mas pra achar vulnerabilidade
+por exploit real em vez de leitura de código): pré-deploy-prod, antes de finalizar
+branch que mexeu em área crítica, ou quando o usuário pedir auditoria "de verdade"/
+"como um hacker faria".
+
 ## Quando sugerir `/claude-security` (varredura profunda)
 
 `claude-security` é caro e interativo (múltiplos agentes, minutos, pede modo `auto`) — não
